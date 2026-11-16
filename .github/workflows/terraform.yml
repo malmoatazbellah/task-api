@@ -1,8 +1,8 @@
 # =============================================================================
 # Infrastructure pipeline
-#   Pull request  → fmt check, validate, plan (plan shown in the job summary)
-#   Push to main  → apply (requires approval on the "infrastructure" environment)
-#   Manual run    → plan / apply / destroy
+#   Pull request  -> fmt check, validate, plan (plan shown in the job summary)
+#   Push to main  -> apply (requires approval on the "infrastructure" environment)
+#   Manual run    -> plan / apply / destroy
 # =============================================================================
 name: Terraform (Infrastructure)
 
@@ -40,6 +40,7 @@ jobs:
     defaults:
       run:
         working-directory: ${{ env.WORKDIR }}
+
     steps:
       - uses: actions/checkout@v5
 
@@ -93,9 +94,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'plan')
     runs-on: ubuntu-latest
     environment: infrastructure   # add "Required reviewers" on this environment in GitHub
+
     defaults:
       run:
         working-directory: ${{ env.WORKDIR }}
+
     steps:
       - uses: actions/checkout@v5
 

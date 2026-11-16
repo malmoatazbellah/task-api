@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region for all resources"
   type        = string
-  default     = "us-east-1"
+  default     = "eu-central-1"
 }
 
 variable "project" {
@@ -12,6 +12,16 @@ variable "project" {
 
 variable "github_owner" {
   description = "GitHub user or organization that owns the repo (e.g. 'jane-doe')"
+  type        = string
+}
+
+variable "github_owner_id" {
+  description = "Immutable numeric ID of the GitHub repository owner"
+  type        = string
+}
+
+variable "github_repo_id" {
+  description = "Immutable numeric ID of the GitHub repository"
   type        = string
 }
 
