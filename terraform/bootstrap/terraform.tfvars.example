@@ -2,4 +2,6 @@
 aws_region   = "us-east-1"
 project      = "capstone"
 github_owner = "your-github-username"
+github_owner_id = "your-github-owner-id"
 github_repo  = "devops-capstone"
+github_repo_id = "your-repository-id"
