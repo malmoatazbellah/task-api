@@ -47,6 +47,25 @@ jobs:
         with:
           terraform_version: "~1.13"
 
+    - name: Inspect OIDC subject
+      shell: bash
+      run: |
+      RESPONSE=$(curl -sSf \
+        -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+         "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
+
+      TOKEN=$(echo "$RESPONSE" | jq -r '.value')
+      PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
+
+    # Convert base64url -> base64 and add padding.
+    PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
+    case $((${#PAYLOAD} % 4)) in
+      2) PAYLOAD="${PAYLOAD}==" ;;
+      3) PAYLOAD="${PAYLOAD}=" ;;
+    esac
+
+      echo "$PAYLOAD" | base64 --decode | jq '{sub, aud}'
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
