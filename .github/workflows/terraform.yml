@@ -1,8 +1,8 @@
 # =============================================================================
 # Infrastructure pipeline
-#   Pull request  → fmt check, validate, plan (plan shown in the job summary)
-#   Push to main  → apply (requires approval on the "infrastructure" environment)
-#   Manual run    → plan / apply / destroy
+#   Pull request  -> fmt check, validate, plan (plan shown in the job summary)
+#   Push to main  -> apply (requires approval on the "infrastructure" environment)
+#   Manual run    -> plan / apply / destroy
 # =============================================================================
 name: Terraform (Infrastructure)
 
@@ -40,6 +40,7 @@ jobs:
     defaults:
       run:
         working-directory: ${{ env.WORKDIR }}
+
     steps:
       - uses: actions/checkout@v5
 
@@ -47,21 +48,24 @@ jobs:
         with:
           terraform_version: "~1.13"
 
-    - name: Inspect OIDC subject
-      shell: bash
-      run:
-        RESPONSE=$(curl -sSf -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
-        TOKEN=$(echo "$RESPONSE" | jq -r '.value')
-        PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
+      - name: Inspect OIDC subject
+        shell: bash
+        run: |
+          RESPONSE=$(curl -sSf \
+            -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")
 
-    # Convert base64url -> base64 and add padding.
-        PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
-        case $((${#PAYLOAD} % 4)) in
-          2) PAYLOAD="${PAYLOAD}==" ;;
-          3) PAYLOAD="${PAYLOAD}=" ;;
-        esac
+          TOKEN=$(echo "$RESPONSE" | jq -r '.value')
+          PAYLOAD=$(echo "$TOKEN" | cut -d '.' -f2)
 
-        echo "$PAYLOAD" | base64 --decode | jq '{sub, aud}'
+          # Convert base64url to base64 and add padding.
+          PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
+          case $((${#PAYLOAD} % 4)) in
+            2) PAYLOAD="${PAYLOAD}==" ;;
+            3) PAYLOAD="${PAYLOAD}=" ;;
+          esac
+
+          echo "$PAYLOAD" | base64 --decode | jq '{sub, aud}'
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -109,9 +113,11 @@ jobs:
       (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'plan')
     runs-on: ubuntu-latest
     environment: infrastructure   # add "Required reviewers" on this environment in GitHub
+
     defaults:
       run:
         working-directory: ${{ env.WORKDIR }}
+
     steps:
       - uses: actions/checkout@v5
 
