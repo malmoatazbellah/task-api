@@ -60,7 +60,7 @@ spec:
             periodSeconds: 10
           readinessProbe:
             httpGet:
-              path: /does-not-exist
+              path: /readyz
               port: http
             periodSeconds: 5
           securityContext:
