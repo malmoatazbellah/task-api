@@ -64,7 +64,7 @@ function createApp() {
   });
 
   // Liveness: is the process alive?
-  app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+  app.get('/does-not-exist', (req, res) => res.json({ status: 'ok' }));
 
   // Readiness: should this pod receive traffic?
   app.get('/readyz', (req, res) => {
