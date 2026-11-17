@@ -59,6 +59,7 @@ function createApp() {
       environment: process.env.APP_ENV || 'local',
       hostname: require('os').hostname(), // shows which pod answered
       message: process.env.WELCOME_MESSAGE || 'Hello from the DevOps capstone!',
+      deployedBy: 'GitHub Actions',
     });
   });
 
