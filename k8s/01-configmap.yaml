@@ -5,4 +5,4 @@ metadata:
   namespace: task-api
 data:
   APP_ENV: "production"
-  WELCOME_MESSAGE: "Deployed to EKS by GitHub Actions 🚀"
+  WELCOME_MESSAGE: "TO THE MOOOOOOOOOOOOOOOOOOOON 🚀"
