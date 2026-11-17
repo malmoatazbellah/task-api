@@ -19,8 +19,6 @@ COPY --chown=node:node package.json ./
 
 COPY --chown=node:node src ./src
 
-USER 1000:1000
-
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=3s CMD ["wget", "-qO-", "http://localhost:3000/healthz"]
