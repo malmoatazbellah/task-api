@@ -54,7 +54,7 @@ spec:
               memory: 256Mi
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /does-not-exist
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
