@@ -27,16 +27,16 @@ variable "kubernetes_version" {
 
 variable "node_instance_types" {
   type    = list(string)
-  default = ["t3.medium"]
+  default = ["t3.small"]
 }
 
 variable "node_desired_size" {
   type    = number
-  default = 2
+  default = 3
 }
 
 variable "admin_principal_arns" {
   description = "Extra IAM user/role ARNs (e.g. your own IAM user) that get cluster-admin via kubectl"
   type        = list(string)
-  default     = []
+  default     = ["arn:aws:iam::349631302690:root"]
 }
