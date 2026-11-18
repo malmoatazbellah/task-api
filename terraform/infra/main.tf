@@ -87,6 +87,7 @@ module "eks" {
   cluster_addons = {
     coredns                = {}
     kube-proxy             = {}
+    metrics-server         = {}
     vpc-cni                = { before_compute = true }
     eks-pod-identity-agent = { before_compute = true }
   }
