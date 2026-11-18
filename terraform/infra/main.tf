@@ -87,7 +87,11 @@ module "eks" {
   cluster_addons = {
     coredns                = {}
     kube-proxy             = {}
-    metrics-server         = {}
+    metrics-server         = {
+      configuration_values = jsonencode({
+        containerPort= 4443
+      })
+    }
     vpc-cni                = { before_compute = true }
     eks-pod-identity-agent = { before_compute = true }
   }
