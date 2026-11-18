@@ -85,9 +85,13 @@ module "eks" {
   subnet_ids = module.vpc.private_subnets
 
   cluster_addons = {
-    coredns                = {}
-    kube-proxy             = {}
-    metrics-server         = {}
+    coredns    = {}
+    kube-proxy = {}
+    metrics-server = {
+      configuration_values = jsonencode({
+        containerPort = 4443
+      })
+    }
     vpc-cni                = { before_compute = true }
     eks-pod-identity-agent = { before_compute = true }
   }
