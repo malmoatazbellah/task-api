@@ -11,6 +11,10 @@ data "aws_iam_role" "github_deploy" {
   name = "${var.project}-github-deploy"
 }
 
+data "aws_iam_role" "github_terraform" {
+  name = "${var.project}-github-terraform"
+}
+
 # =============================================================================
 # VPC — 2 AZs, public subnets (load balancers) + private subnets (worker nodes)
 # =============================================================================
@@ -107,7 +111,9 @@ module "eks" {
   }
 
   # Whoever runs `terraform apply` (the pipeline role) becomes cluster admin.
-  enable_cluster_creator_admin_permissions = true
+  enable_cluster_creator_admin_permissions = false
+
+  kms_key_administrators = [data.aws_iam_role.github_terraform.arn]
 
   # EKS access entries: map IAM principals → Kubernetes permissions
   access_entries = merge(
@@ -117,6 +123,16 @@ module "eks" {
         policy_associations = {
           admin = {
             # Stretch goal: scope this down to the app namespace with AmazonEKSEditPolicy
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+            access_scope = { type = "cluster" }
+          }
+        }
+      }
+
+      cluster_creator = {
+        principal_arn = data.aws_iam_role.github_terraform.arn
+        policy_associations = {
+          admin = {
             policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
             access_scope = { type = "cluster" }
           }
