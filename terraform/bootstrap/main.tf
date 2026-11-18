@@ -85,6 +85,10 @@ resource "aws_iam_openid_connect_provider" "github" {
 # Trust policy builder: only THIS repo, and only the listed "sub" claims.
 data "aws_iam_policy_document" "github_trust" {
   for_each = {
+    plan = [
+      "repo:${local.repo}:pull_request",
+      "repo:${local.repo}:ref:refs/heads/main",
+    ]
     terraform = [
       "repo:${local.repo}:ref:refs/heads/main",
       "repo:${local.repo}:pull_request",
@@ -129,6 +133,32 @@ resource "aws_iam_role_policy_attachment" "github_terraform_admin" {
   role       = aws_iam_role.github_terraform.name
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
+
+resource "aws_iam_role" "github_plan" {
+  name               = "${var.project}-github-plan"
+  assume_role_policy = data.aws_iam_policy_document.github_trust["plan"].json
+}
+
+resource "aws_iam_role_policy_attachment" "github_plan_readonly" {
+  role       = aws_iam_role.github_plan.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
+data "aws_iam_policy_document" "plan_state_lock" {
+  statement {
+    sid       = "StateLockFile"
+    actions   = ["s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.tf_state.arn}/infra/terraform.tfstate.tflock"]
+
+  }
+}
+
+resource "aws_iam_role_policy" "github_plan_state_lock" {
+  name   = "state-lock-file"
+  role   = aws_iam_role.github_plan.id
+  policy = data.aws_iam_policy_document.plan_state_lock.json
+}
+
 
 # -----------------------------------------------------------------------------
 # 4. App deploy role (least privilege: ECR push + describe EKS cluster).

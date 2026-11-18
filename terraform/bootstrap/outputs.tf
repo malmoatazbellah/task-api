@@ -15,3 +15,7 @@ output "AWS_DEPLOY_ROLE_ARN" {
 output "AWS_REGION" {
   value = var.aws_region
 }
+
+output "AWS_PLAN_ROLE_ARN" {
+  value = aws_iam_role.github_plan.arn
+}
