@@ -117,7 +117,7 @@ jobs:
 
       - name: Sign the image
         run: |
-          digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "${{steps.meta.outputs.image}}"))
+          digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "${{steps.meta.outputs.image}}")
           cosign sign --yes "$digest_ref"
 
   deploy:
