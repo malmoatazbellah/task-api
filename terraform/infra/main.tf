@@ -154,3 +154,148 @@ module "eks" {
     }
   )
 }
+
+# =============================================================================
+# Helm provider — authenticates to EKS using the same AWS credentials
+# =============================================================================
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+    }
+  }
+}
+
+# =============================================================================
+# kube-prometheus-stack — Prometheus + Grafana, trimmed for t3.small nodes
+# =============================================================================
+resource "helm_release" "kube_prometheus" {
+  name             = "kube-prometheus"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = "70.4.2"
+  namespace        = "monitoring"
+  create_namespace = true
+
+  # Wait for all pods to be ready before Terraform considers this done
+  wait    = true
+  timeout = 600
+
+  values = [<<-EOT
+    alertmanager:
+      enabled: false
+
+    grafana:
+      adminPassword: "capstone-admin"
+      service:
+        type: LoadBalancer
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      sidecar:
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+      dashboardProviders:
+        dashboardproviders.yaml:
+          apiVersion: 1
+          providers:
+            - name: default
+              folder: ""
+              type: file
+              disableDeletion: false
+              options:
+                path: /var/lib/grafana/dashboards/default
+      dashboards:
+        default:
+          task-api:
+            json: |
+              {
+                "title": "Task API",
+                "uid": "task-api",
+                "schemaVersion": 38,
+                "refresh": "30s",
+                "panels": [
+                  {
+                    "id": 1,
+                    "title": "Request Rate (req/s)",
+                    "type": "timeseries",
+                    "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+                    "targets": [{
+                      "expr": "sum(rate(http_requests_total[1m])) by (method, route, status)",
+                      "legendFormat": "{{method}} {{route}} {{status}}"
+                    }]
+                  },
+                  {
+                    "id": 2,
+                    "title": "p95 Latency (s)",
+                    "type": "timeseries",
+                    "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+                    "targets": [{
+                      "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[1m])) by (le, route))",
+                      "legendFormat": "{{route}}"
+                    }]
+                  },
+                  {
+                    "id": 3,
+                    "title": "Error Rate (%)",
+                    "type": "stat",
+                    "gridPos": { "x": 0, "y": 8, "w": 6, "h": 4 },
+                    "targets": [{
+                      "expr": "100 * sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m]))",
+                      "legendFormat": "error %"
+                    }]
+                  }
+                ]
+              }
+
+    prometheus:
+      prometheusSpec:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 400m
+            memory: 512Mi
+        # Only scrape ServiceMonitors in the monitoring and task-api namespaces
+        serviceMonitorNamespaceSelector:
+          matchExpressions:
+            - key: kubernetes.io/metadata.name
+              operator: In
+              values: ["monitoring", "task-api"]
+        serviceMonitorSelector: {}
+        retention: 6h
+        retentionSize: "1GB"
+
+    nodeExporter:
+      enabled: false
+
+    kubeStateMetrics:
+      enabled: false
+
+    prometheusOperator:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 128Mi
+  EOT
+  ]
+
+  depends_on = [module.eks]
+}

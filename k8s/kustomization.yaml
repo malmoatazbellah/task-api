@@ -7,3 +7,4 @@ resources:
   - 02-deployment.yaml
   - 03-service.yaml
   - 04-hpa.yaml
+  - 05-servicemonitor.yaml
