@@ -15,6 +15,22 @@ data "aws_iam_role" "github_terraform" {
   name = "${var.project}-github-terraform"
 }
 
+data "aws_eks_cluster" "this" {
+  name = module.eks.cluster_name
+}
+
+data "aws_eks_cluster_auth" "this" {
+  name = module.eks.cluster_name
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = data.aws_eks_cluster.this.endpoint
+    cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
+    token                  = data.aws_eks_cluster_auth.this.token
+  }
+}
+
 # =============================================================================
 # VPC — 2 AZs, public subnets (load balancers) + private subnets (worker nodes)
 # =============================================================================
@@ -499,4 +515,30 @@ resource "aws_eks_pod_identity_association" "lbc" {
   namespace       = "kube-system"
   service_account = "aws-load-balancer-controller"
   role_arn        = aws_iam_role.lbc.arn
+}
+
+resource "helm_release" "aws_load_balancer_controller" {
+  name       = "aws-load-balancer-controller"
+  repository = "https://aws.github.io/eks-charts"
+  chart      = "aws-load-balancer-controller"
+  namespace  = "kube-system"
+
+  set {
+    name  = "clusterName"
+    value = module.eks.cluster_name
+  }
+
+  set {
+    name  = "serviceAccount.create"
+    value = "true"
+  }
+
+  set {
+    name  = "serviceAccount.name"
+    value = "aws-load-balancer-controller"
+  }
+
+  depends_on = [
+    aws_eks_pod_identity_association.lbc
+  ]
 }
