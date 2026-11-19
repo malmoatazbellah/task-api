@@ -273,7 +273,7 @@ data "aws_iam_policy_document" "terraform_apply" {
     condition {
       test     = "StringEquals"
       variable = "iam:PassedToService"
-      values   = ["eks.amazonaws.com", "ec2.amazonaws.com", "pods.eks.amazonaws.com"]
+      values   = ["eks.amazonaws.com", "ec2.amazonaws.com"]
     }
   }
   statement {
