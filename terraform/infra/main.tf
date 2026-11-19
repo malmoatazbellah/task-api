@@ -122,9 +122,11 @@ module "eks" {
         principal_arn = data.aws_iam_role.github_deploy.arn
         policy_associations = {
           admin = {
-            # Stretch goal: scope this down to the app namespace with AmazonEKSEditPolicy
-            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
-            access_scope = { type = "cluster" }
+            policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
+            access_scope = {
+              type       = "namespace"
+              namespaces = ["task-api"]
+            }
           }
         }
       }
