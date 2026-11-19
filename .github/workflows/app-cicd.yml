@@ -208,7 +208,7 @@ jobs:
         run: |
           for i in $(seq 1 20); do
             host=$(kubectl get svc -n monitoring kube-prometheus-grafana \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$host" ]; then
               echo "### 📊 Grafana: http://$host  (admin / capstone-admin)" >> "$GITHUB_STEP_SUMMARY"
               exit 0
