@@ -13,6 +13,10 @@ on:
   push:
     branches: [main]
     paths: ["app/**", "k8s/**", ".github/workflows/app-cicd.yml"]
+  workflow_run:
+    workflows: ["Terraform (Infrastructure)"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -27,7 +31,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}     # e.g. capstone-dev-task-api
   EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }} # e.g. capstone-dev
-  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
 jobs:
   test:
@@ -59,7 +63,9 @@ jobs:
   build-push:
     name: Build, scan & push image
     needs: [test, lint-docker]
-    if: github.event_name != 'pull_request'
+    if: >
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -141,10 +147,19 @@ jobs:
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 
       - name: Render manifests
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
-          sed -i "s|IMAGE_PLACEHOLDER|${{ needs.build-push.outputs.image }}|" k8s/02-deployment.yaml
-          sed -i "s|VERSION_PLACEHOLDER|\"${IMAGE_TAG::7}\"|" k8s/02-deployment.yaml
-          grep -n "image:" k8s/02-deployment.yaml
+          cd k8s
+
+          kubectl kustomize edit set image task-api="$IMAGE"
+
+          VERSION="${IMAGE_TAG:0:7}"
+
+          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\n  namespace: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
+
+          kubectl kustomize edit add patch --path version-patch.yaml
+          kubectl kustomize .
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2
@@ -162,7 +177,7 @@ jobs:
             "${{ needs.build-push.outputs.image }}"
 
       - name: Apply manifests
-        run: kubectl apply -f k8s/
+        run: kubectl apply -k k8s/
 
       - name: Wait for rollout (auto-rollback on failure)
         run: |
