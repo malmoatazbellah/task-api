@@ -153,3 +153,10 @@ jobs:
             --timeout 10m \
             -f terraform/helm-values-monitoring.yaml
           kubectl apply -f k8s/05-servicemonitor.yaml
+          host=$(kubectl get svc -n monitoring kube-prometheus-grafana \
+            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+          if [ -n "$host" ]; then
+            echo "### 📊 Grafana: http://$host  (admin / capstone-admin)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Grafana LB not ready yet — check manually"
+          fi

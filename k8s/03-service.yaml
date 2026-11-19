@@ -5,6 +5,8 @@ kind: Service
 metadata:
   name: task-api
   namespace: task-api
+  labels:
+    app: task-api
 spec:
   type: LoadBalancer
   selector:

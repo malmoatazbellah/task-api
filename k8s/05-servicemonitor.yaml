@@ -3,6 +3,8 @@ kind: ServiceMonitor
 metadata:
   name: task-api
   namespace: task-api
+  labels:
+    release: kube-prometheus
 spec:
   selector:
     matchLabels:

@@ -204,15 +204,3 @@ jobs:
             echo "Waiting for load balancer DNS... ($i/30)"; sleep 10
           done
           echo "::warning::Load balancer not reachable yet (new LBs can take a few minutes)"
-      - name: Grafana URL
-        run: |
-          for i in $(seq 1 20); do
-            host=$(kubectl get svc -n monitoring kube-prometheus-grafana \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-            if [ -n "$host" ]; then
-              echo "### 📊 Grafana: http://$host  (admin / capstone-admin)" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
-            fi
-            echo "Waiting for Grafana LB... ($i/20)"; sleep 15
-          done
-          echo "::warning::Grafana LB not ready yet — check manually"
