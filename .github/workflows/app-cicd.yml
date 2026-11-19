@@ -146,20 +146,23 @@ jobs:
       - name: Configure kubectl
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
+
       - name: Render manifests
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
           cd k8s
 
-          kubectl kustomize edit set image task-api="$IMAGE"
+          kustomize edit set image task-api="$IMAGE"
 
           VERSION="${IMAGE_TAG:0:7}"
 
           printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\n  namespace: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
 
-          kubectl kustomize edit add patch --path version-patch.yaml
-          kubectl kustomize .
+          kustomize edit add patch --path version-patch.yaml
+          kustomize build .
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2
