@@ -138,9 +138,18 @@ jobs:
             terraform output
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Apply ServiceMonitor
+      - name: Install monitoring stack
         if: github.event.inputs.action != 'destroy'
         working-directory: ${{ github.workspace }}
         run: |
           aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm upgrade --install kube-prometheus prometheus-community/kube-prometheus-stack \
+            --version 70.4.2 \
+            --namespace monitoring \
+            --create-namespace \
+            --wait \
+            --timeout 10m \
+            -f terraform/helm-values-monitoring.yaml
           kubectl apply -f k8s/05-servicemonitor.yaml
