@@ -173,16 +173,16 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke test through the load balancer
+      - name: Smoke test through the ingress
         run: |
           for i in $(seq 1 30); do
-            host=$(kubectl get svc task-api -n task-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            host=$(kubectl get ingress task-api -n task-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
             if [ -n "$host" ] && curl -fsS "http://$host/healthz"; then
               echo
               echo "### 🚀 Deployed: http://$host" >> "$GITHUB_STEP_SUMMARY"
               curl -fsS "http://$host/"
               exit 0
             fi
-            echo "Waiting for load balancer DNS... ($i/30)"; sleep 10
+            echo "Waiting for ingress DNS... ($i/30)"; sleep 10
           done
-          echo "::warning::Load balancer not reachable yet (new LBs can take a few minutes)"
+          echo "::warning::Ingress not reachable yet (new ALBs can take a few minutes)"
