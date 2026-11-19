@@ -138,3 +138,9 @@ jobs:
             terraform output
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Apply ServiceMonitor
+        if: github.event.inputs.action != 'destroy'
+        working-directory: ${{ github.workspace }}
+        run: |
+          aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
+          kubectl apply -f k8s/05-servicemonitor.yaml
