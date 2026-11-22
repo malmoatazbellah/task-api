@@ -95,6 +95,7 @@ data "aws_iam_policy_document" "github_trust" {
     deploy = [
       "repo:${local.repo}:ref:refs/heads/main",
       "repo:${local.repo}:environment:production",
+      "repo:${local.repo}:environment:staging",
     ]
   }
 
