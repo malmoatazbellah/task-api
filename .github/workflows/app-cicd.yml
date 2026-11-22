@@ -2,8 +2,9 @@
 # Application pipeline
 #   1. test          → npm ci + unit tests
 #   2. lint-docker   → hadolint checks YOUR Dockerfile
-#   3. build-push    → docker build, Trivy scan, push to ECR (main only)
-#   4. deploy        → kubectl apply to EKS + rollout check + smoke test (main only)
+#   3. build-push    → docker build, Trivy scan, push to ECR
+#   4. deploy-staging   → kubectl apply to EKS (task-api-staging namespace, no approval)
+#   5. deploy           → kubectl apply to EKS (task-api namespace, production approval)
 # =============================================================================
 name: App CI/CD
 
@@ -17,8 +18,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write   # required for AWS OIDC
+  id-token: write      # required for AWS OIDC
   contents: read
+  pull-requests: write # required for hadolint PR annotations
 
 concurrency:
   group: app-deploy-${{ github.ref }}
@@ -73,6 +75,18 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Wait for ECR repository to exist
+        run: |
+          echo "Waiting for ECR repository '${ECR_REPOSITORY}' to exist..."
+          for i in $(seq 1 20); do
+            if aws ecr describe-repositories --repository-names "${ECR_REPOSITORY}" --region "${AWS_REGION}" > /dev/null 2>&1; then
+              echo "ECR repository found."; exit 0
+            fi
+            echo "Attempt ${i}/20 — not found yet, waiting 30 s..."
+            sleep 30
+          done
+          echo "::error::ECR repository '${ECR_REPOSITORY}' did not appear after 10 minutes."; exit 1
+
       - name: Login to Amazon ECR
         id: ecr
         uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2
@@ -121,9 +135,82 @@ jobs:
           digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "${{steps.meta.outputs.image}}")
           cosign sign --yes "$digest_ref"
 
-  deploy:
-    name: Deploy to EKS
+  deploy-staging:
+    name: Deploy to staging
     needs: build-push
+    if: >
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
+
+      - name: Render manifests
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          cd k8s/overlays/staging
+
+          kustomize edit set image task-api="$IMAGE"
+
+          VERSION="${IMAGE_TAG:0:7}"
+
+          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
+
+          kustomize edit remove patch --path version-patch.yaml 2>/dev/null || true
+          kustomize edit add patch --path version-patch.yaml
+          kustomize build .
+
+      - name: Ensure staging namespace exists
+        run: kubectl apply -f k8s/overlays/staging/namespace.yaml
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/staging/
+
+      - name: Wait for rollout (auto-rollback on failure)
+        run: |
+          if ! kubectl rollout status deployment/task-api -n task-api-staging --timeout=180s; then
+            echo "::error::Staging rollout failed — rolling back"
+            kubectl describe pods -n task-api-staging -l app=task-api | tail -50
+            kubectl rollout undo deployment/task-api -n task-api-staging
+            exit 1
+          fi
+
+      - name: Smoke test (staging)
+        run: |
+          for i in $(seq 1 30); do
+            host=$(kubectl get svc task-api -n task-api-staging -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            if [ -n "$host" ] && curl -fsS "http://$host/healthz"; then
+              echo
+              echo "### 🧪 Staging: http://$host" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Waiting for staging load balancer DNS... ($i/30)"; sleep 10
+          done
+          echo "::warning::Staging load balancer not reachable yet"
+
+  deploy:
+    name: Deploy to production
+    needs: [build-push, deploy-staging]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -148,14 +235,15 @@ jobs:
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
-          cd k8s
+          cd k8s/overlays/production
 
           kustomize edit set image task-api="$IMAGE"
 
           VERSION="${IMAGE_TAG:0:7}"
 
-          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\n  namespace: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
+          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
 
+          kustomize edit remove patch --path version-patch.yaml 2>/dev/null || true
           kustomize edit add patch --path version-patch.yaml
           kustomize build .
 
@@ -170,12 +258,12 @@ jobs:
       - name: Verify the image signature
         run: |
           cosign verify \
-            --certificate-identity "https://github.com/malmoatazbellah/task-api/.github/workflows/app-cicd.yml@refs/heads/main" \
+            --certificate-identity "${{ github.server_url }}/${{ github.repository }}/.github/workflows/app-cicd.yml@refs/heads/main" \
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${{ needs.build-push.outputs.image }}"
 
       - name: Apply manifests
-        run: kubectl apply -k k8s/
+        run: kubectl apply -k k8s/overlays/production/
 
       - name: Wait for rollout (auto-rollback on failure)
         run: |

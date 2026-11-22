@@ -125,7 +125,7 @@ module "eks" {
             policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSEditPolicy"
             access_scope = {
               type       = "namespace"
-              namespaces = ["task-api"]
+              namespaces = ["task-api", "task-api-staging"]
             }
           }
         }
