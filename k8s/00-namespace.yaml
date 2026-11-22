@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: task-api
   labels:
-    app.kubernetes.io/part-of: devops-capstone
+    app.kubernetes.io/part-of: capstone-dev

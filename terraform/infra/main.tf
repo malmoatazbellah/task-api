@@ -6,27 +6,6 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# =============================================================================
-# Kubernetes namespaces — created here so the deploy role (namespace-scoped)
-# never needs cluster-level create permissions.
-# =============================================================================
-resource "kubernetes_namespace" "task_api" {
-  metadata {
-    name = "task-api"
-    labels = {
-      "app.kubernetes.io/part-of" = "devops-capstone"
-    }
-  }
-}
-
-resource "kubernetes_namespace" "task_api_staging" {
-  metadata {
-    name = "task-api-staging"
-    labels = {
-      "app.kubernetes.io/part-of" = "devops-capstone"
-    }
-  }
-}
 
 # Role created by the bootstrap stack; the app pipeline uses it to deploy.
 data "aws_iam_role" "github_deploy" {
