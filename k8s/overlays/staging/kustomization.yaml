@@ -5,3 +5,12 @@ namespace: task-api-staging
 
 resources:
   - ../../base
+
+patches:
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: task-api-config
+      data:
+        APP_ENV: "staging"
