@@ -181,9 +181,6 @@ jobs:
           kustomize edit add patch --path version-patch.yaml
           kustomize build .
 
-      - name: Ensure staging namespace exists
-        run: kubectl apply -f k8s/overlays/staging/namespace.yaml
-
       - name: Apply manifests
         run: kubectl apply -k k8s/overlays/staging/
 
