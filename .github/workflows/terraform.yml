@@ -138,6 +138,18 @@ jobs:
             terraform output
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trigger app deploy
+        if: github.event.inputs.action != 'destroy'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'app-cicd.yml',
+              ref: 'main',
+            })
       - name: Install monitoring stack
         if: github.event.inputs.action != 'destroy'
         working-directory: ${{ github.workspace }}
