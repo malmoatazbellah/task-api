@@ -13,10 +13,7 @@ on:
   push:
     branches: [main]
     paths: ["app/**", "k8s/**", ".github/workflows/app-cicd.yml"]
-  workflow_run:
-    workflows: ["Terraform (Infrastructure)"]
-    types: [completed]
-    branches: [main]
+  workflow_call:         # called by terraform.yml after a successful apply
   workflow_dispatch:
 
 permissions:
@@ -31,7 +28,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}     # e.g. capstone-dev-task-api
   EKS_CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }} # e.g. capstone-dev
-  IMAGE_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
   test:
@@ -63,9 +60,7 @@ jobs:
   build-push:
     name: Build, scan & push image
     needs: [test, lint-docker]
-    if: >
-      github.event_name != 'pull_request' &&
-      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.meta.outputs.image }}
