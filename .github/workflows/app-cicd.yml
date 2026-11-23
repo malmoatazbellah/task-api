@@ -305,7 +305,7 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke test through ALB
+      - name: Smoke test through ALB #quick test
         run: |
           for i in $(seq 1 30); do
             host=$(kubectl get ingress task-api -n task-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
