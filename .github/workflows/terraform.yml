@@ -126,6 +126,22 @@ jobs:
           name: tfplan
           path: ${{ env.WORKDIR }}
 
+      - name: Delete k8s workloads before destroy (removes ALBs so VPC subnets can be deleted)
+        if: github.event.inputs.action == 'destroy'
+        working-directory: ${{ github.workspace }}
+        run: |
+          aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
+          kubectl delete -k k8s/overlays/production/ --ignore-not-found
+          kubectl delete -k k8s/overlays/staging/ --ignore-not-found
+          echo "Waiting for ALBs to be deleted..."
+          for i in $(seq 1 24); do
+            count=$(aws elbv2 describe-load-balancers \
+              --query "LoadBalancers[?contains(LoadBalancerName, 'k8s-taskapi')].LoadBalancerArn" \
+              --output text | wc -w)
+            [ "$count" -eq 0 ] && echo "All ALBs gone." && break
+            echo "Still $count ALB(s) present... ($i/24)"; sleep 15
+          done
+
       - name: Terraform apply
         run: terraform apply -input=false tfplan
 
