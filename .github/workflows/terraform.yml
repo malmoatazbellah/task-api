@@ -142,6 +142,28 @@ jobs:
             echo "Still $count ALB(s) present... ($i/24)"; sleep 15
           done
 
+          VPC_ID=$(aws ec2 describe-vpcs \
+            --filters "Name=tag:Name,Values=${{ vars.EKS_CLUSTER_NAME }}-vpc" \
+            --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
+          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+            echo "Waiting for EKS-managed ENIs in VPC $VPC_ID to be released..."
+            for i in $(seq 1 24); do
+              eni_ids=$(aws ec2 describe-network-interfaces \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                          "Name=status,Values=available" \
+                --query 'NetworkInterfaces[?contains(Description, `ELB`) || contains(Description, `Amazon EKS`) || contains(Description, `aws-load-balancer`)].NetworkInterfaceId' \
+                --output text)
+              if [ -z "$eni_ids" ] || [ "$eni_ids" = "None" ]; then
+                echo "No orphaned ENIs found."; break
+              fi
+              echo "Deleting orphaned ENIs: $eni_ids"
+              for eni in $eni_ids; do
+                aws ec2 delete-network-interface --network-interface-id "$eni" 2>/dev/null || true
+              done
+              echo "Waiting for ENI release... ($i/24)"; sleep 15
+            done
+          fi
+
       - name: Terraform apply
         run: terraform apply -input=false tfplan
 
