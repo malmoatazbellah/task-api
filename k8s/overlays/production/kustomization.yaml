@@ -5,3 +5,4 @@ namespace: task-api
 
 resources:
   - ../../base
+  - 06-ingress.yaml
