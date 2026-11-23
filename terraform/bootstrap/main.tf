@@ -297,6 +297,12 @@ data "aws_iam_policy_document" "terraform_apply" {
     actions   = ["iam:GetRole"]
     resources = ["arn:aws:iam::${local.account_id}:role/aws-service-role/*"]
   }
+
+  statement {
+    sid     = "ElbDescribe"
+    actions = ["elasticloadbalancing:DescribeLoadBalancers"]
+    resources = ["*"]
+  }
 }
 
 # Inline, because inline role policies allow a larger size than managed ones.
