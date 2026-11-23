@@ -133,39 +133,29 @@ jobs:
           aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
           kubectl delete -k k8s/overlays/production/ --ignore-not-found
           kubectl delete -k k8s/overlays/staging/ --ignore-not-found
-          kubectl delete namespace monitoring --ignore-not-found
+          kubectl delete namespace monitoring --ignore-not-found --timeout=60s || \
+            kubectl patch namespace monitoring -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=${{ vars.EKS_CLUSTER_NAME }}-vpc" \
             --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
           if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
             echo "Waiting for load balancers in VPC $VPC_ID to be deleted..."
             for i in $(seq 1 24); do
-              count=$(aws elbv2 describe-load-balancers \
+              lb_arns=$(aws elbv2 describe-load-balancers \
                 --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
-                --output text | wc -w)
-              [ "$count" -eq 0 ] && echo "All load balancers gone." && break
-              echo "Still $count load balancer(s) present... ($i/24)"; sleep 15
+                --output text)
+              [ -z "$lb_arns" ] || [ "$lb_arns" = "None" ] && echo "All load balancers gone." && break
+              echo "Still load balancer(s) present... ($i/24)"
+              if [ "$i" -ge 20 ]; then
+                echo "Force-deleting remaining load balancers..."
+                for arn in $lb_arns; do
+                  aws elbv2 delete-load-balancer --load-balancer-arn "$arn" 2>/dev/null || true
+                done
+              fi
+              sleep 15
             done
           else
             echo "VPC not found, skipping load balancer wait."
-          fi
-          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
-            echo "Waiting for EKS-managed ENIs in VPC $VPC_ID to be released..."
-            for i in $(seq 1 24); do
-              eni_ids=$(aws ec2 describe-network-interfaces \
-                --filters "Name=vpc-id,Values=$VPC_ID" \
-                          "Name=status,Values=available" \
-                --query 'NetworkInterfaces[?contains(Description, `ELB`) || contains(Description, `Amazon EKS`) || contains(Description, `aws-load-balancer`)].NetworkInterfaceId' \
-                --output text)
-              if [ -z "$eni_ids" ] || [ "$eni_ids" = "None" ]; then
-                echo "No orphaned ENIs found."; break
-              fi
-              echo "Deleting orphaned ENIs: $eni_ids"
-              for eni in $eni_ids; do
-                aws ec2 delete-network-interface --network-interface-id "$eni" 2>/dev/null || true
-              done
-              echo "Waiting for ENI release... ($i/24)"; sleep 15
-            done
           fi
 
       - name: Terraform apply
