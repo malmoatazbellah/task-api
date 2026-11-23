@@ -4,7 +4,7 @@ alertmanager:
 grafana:
   adminPassword: "capstone-admin"
   service:
-    type: LoadBalancer
+    type: ClusterIP
   resources:
     requests:
       cpu: 50m

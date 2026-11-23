@@ -133,18 +133,22 @@ jobs:
           aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
           kubectl delete -k k8s/overlays/production/ --ignore-not-found
           kubectl delete -k k8s/overlays/staging/ --ignore-not-found
-          echo "Waiting for ALBs to be deleted..."
-          for i in $(seq 1 24); do
-            count=$(aws elbv2 describe-load-balancers \
-              --query "LoadBalancers[?contains(LoadBalancerName, 'k8s-taskapi')].LoadBalancerArn" \
-              --output text | wc -w)
-            [ "$count" -eq 0 ] && echo "All ALBs gone." && break
-            echo "Still $count ALB(s) present... ($i/24)"; sleep 15
-          done
-
+          kubectl delete namespace monitoring --ignore-not-found
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=${{ vars.EKS_CLUSTER_NAME }}-vpc" \
             --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
+          if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
+            echo "Waiting for load balancers in VPC $VPC_ID to be deleted..."
+            for i in $(seq 1 24); do
+              count=$(aws elbv2 describe-load-balancers \
+                --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+                --output text | wc -w)
+              [ "$count" -eq 0 ] && echo "All load balancers gone." && break
+              echo "Still $count load balancer(s) present... ($i/24)"; sleep 15
+            done
+          else
+            echo "VPC not found, skipping load balancer wait."
+          fi
           if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
             echo "Waiting for EKS-managed ENIs in VPC $VPC_ID to be released..."
             for i in $(seq 1 24); do
@@ -207,10 +211,12 @@ jobs:
             -f terraform/helm-values-monitoring.yaml
           kubectl apply -f k8s/00-namespace.yaml
           kubectl apply -f k8s/05-servicemonitor.yaml
-          host=$(kubectl get svc -n monitoring kube-prometheus-grafana \
-            -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
-          if [ -n "$host" ]; then
-            echo "### 📊 Grafana: http://$host  (admin / capstone-admin)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning::Grafana LB not ready yet — check manually"
-          fi
+          kubectl apply -f k8s/06-grafana-ingress.yaml
+          for i in $(seq 1 30); do
+            host=$(kubectl get ingress grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -n "$host" ]; then
+              echo "### 📊 Grafana: http://$host  (admin / capstone-admin)" >> "$GITHUB_STEP_SUMMARY"
+              break
+            fi
+            echo "Waiting for Grafana ALB DNS... ($i/30)"; sleep 10
+          done
