@@ -162,6 +162,14 @@ jobs:
       - name: Configure kubectl
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
 
+      - name: Wait for EKS cluster to be active
+        run: |
+          for i in $(seq 1 40); do
+            status=$(aws eks describe-cluster --name "$EKS_CLUSTER_NAME" --query 'cluster.status' --output text)
+            [ "$status" = "ACTIVE" ] && echo "Cluster is ACTIVE." && break
+            echo "Cluster status: $status ($i/40)"; sleep 15
+          done
+            
       - name: Install kustomize
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
 
@@ -226,6 +234,14 @@ jobs:
 
       - name: Configure kubectl
         run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$EKS_CLUSTER_NAME"
+      
+      - name: Wait for EKS cluster to be active
+        run: |
+          for i in $(seq 1 40); do
+            status=$(aws eks describe-cluster --name "$EKS_CLUSTER_NAME" --query 'cluster.status' --output text)
+            [ "$status" = "ACTIVE" ] && echo "Cluster is ACTIVE." && break
+            echo "Cluster status: $status ($i/40)"; sleep 15
+          done
 
       - name: Install kustomize
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
