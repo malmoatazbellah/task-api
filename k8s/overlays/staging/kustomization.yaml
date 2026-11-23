@@ -5,7 +5,6 @@ namespace: task-api-staging
 
 resources:
   - ../../base
-  - namespace.yaml
 
 patches:
   - patch: |-
