@@ -122,15 +122,31 @@ jobs:
             --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
             "${{ steps.meta.outputs.image }}"
 
+      - name: Check if image tag already exists in ECR
+        id: ecr-check
+        run: |
+          if aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --region "${AWS_REGION}" > /dev/null 2>&1; then
+            echo "Image tag ${IMAGE_TAG} already exists in ECR — skipping push."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Push image
+        if: steps.ecr-check.outputs.skip != 'true'
         run: docker push "${{ steps.meta.outputs.image }}"
 
       - name: Install cosign
+        if: steps.ecr-check.outputs.skip != 'true'
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 #v4.1.3
         with:
           cosign-release: 'v3.1.4'
 
       - name: Sign the image
+        if: steps.ecr-check.outputs.skip != 'true'
         run: |
           digest_ref=$(docker inspect --format '{{index .RepoDigests 0}}' "${{steps.meta.outputs.image}}")
           cosign sign --yes "$digest_ref"
