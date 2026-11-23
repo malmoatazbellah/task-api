@@ -130,30 +130,54 @@ jobs:
         if: github.event.inputs.action == 'destroy'
         working-directory: ${{ github.workspace }}
         run: |
-          aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
-          kubectl delete -k k8s/overlays/production/ --ignore-not-found
-          kubectl delete -k k8s/overlays/staging/ --ignore-not-found
-          kubectl delete namespace monitoring --ignore-not-found --timeout=60s || \
-            kubectl patch namespace monitoring -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+          if aws eks describe-cluster --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }} > /dev/null 2>&1; then
+            aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
+            kubectl delete -k k8s/overlays/production/ --ignore-not-found
+            kubectl delete -k k8s/overlays/staging/ --ignore-not-found
+            kubectl delete namespace monitoring --ignore-not-found --timeout=60s || \
+              kubectl patch namespace monitoring -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+          else
+            echo "EKS cluster not found, skipping k8s cleanup."
+          fi
           VPC_ID=$(aws ec2 describe-vpcs \
             --filters "Name=tag:Name,Values=${{ vars.EKS_CLUSTER_NAME }}-vpc" \
             --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
           if [ -n "$VPC_ID" ] && [ "$VPC_ID" != "None" ]; then
             echo "Waiting for load balancers in VPC $VPC_ID to be deleted..."
+            force_deleted=false
             for i in $(seq 1 24); do
               lb_arns=$(aws elbv2 describe-load-balancers \
                 --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
                 --output text)
-              [ -z "$lb_arns" ] || [ "$lb_arns" = "None" ] && echo "All load balancers gone." && break
+              if [ -z "$lb_arns" ] || [ "$lb_arns" = "None" ]; then
+                echo "All load balancers gone."
+                break
+              fi
               echo "Still load balancer(s) present... ($i/24)"
-              if [ "$i" -ge 20 ]; then
+              if [ "$i" -ge 20 ] && [ "$force_deleted" = "false" ]; then
                 echo "Force-deleting remaining load balancers..."
                 for arn in $lb_arns; do
                   aws elbv2 delete-load-balancer --load-balancer-arn "$arn" 2>/dev/null || true
                 done
+                force_deleted=true
               fi
               sleep 15
             done
+            # After force-delete, wait up to 3 more minutes for ENIs to release
+            if [ "$force_deleted" = "true" ]; then
+              echo "Waiting for ENIs to release after force-delete..."
+              for i in $(seq 1 12); do
+                lb_arns=$(aws elbv2 describe-load-balancers \
+                  --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+                  --output text)
+                if [ -z "$lb_arns" ] || [ "$lb_arns" = "None" ]; then
+                  echo "All load balancers gone."
+                  break
+                fi
+                echo "Still waiting for ENIs... ($i/12)"
+                sleep 15
+              done
+            fi
           else
             echo "VPC not found, skipping load balancer wait."
           fi
