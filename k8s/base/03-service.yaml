@@ -1,5 +1,3 @@
-# type: LoadBalancer makes AWS create a public load balancer for the app.
-# Stretch goal: install the AWS Load Balancer Controller and use an Ingress (ALB) instead.
 apiVersion: v1
 kind: Service
 metadata:
@@ -7,7 +5,7 @@ metadata:
   labels:
     app: task-api
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: task-api
   ports:

@@ -5,6 +5,7 @@ namespace: task-api-staging
 
 resources:
   - ../../base
+  - 06-ingress.yaml
 
 patches:
   - patch: |-
