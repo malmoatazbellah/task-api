@@ -22,3 +22,7 @@ output "configure_kubectl" {
   description = "Run this to point kubectl at the new cluster"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "lbc_role_arn" {
+  value = aws_iam_role.lbc.arn
+}
