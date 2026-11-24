@@ -3,8 +3,8 @@
 #   1. test          → npm ci + unit tests
 #   2. lint-docker   → hadolint checks YOUR Dockerfile
 #   3. build-push    → docker build, Trivy scan, push to ECR
-#   4. deploy-staging   → kubectl apply to EKS (task-api-staging namespace, no approval)
-#   5. deploy           → kubectl apply to EKS (task-api namespace, production approval)
+#   4. deploy-staging → commit the staging desired state for Argo CD
+#   5. deploy         → commit the production desired state after approval
 # =============================================================================
 name: App CI/CD
 
@@ -13,17 +13,17 @@ on:
     paths: ["app/**", "k8s/**", ".github/workflows/app-cicd.yml"]
   push:
     branches: [main]
-    paths: ["app/**", "k8s/**", ".github/workflows/app-cicd.yml"]
+    paths: ["app/**", ".github/workflows/app-cicd.yml"]
   workflow_call:         # called by terraform.yml after a successful apply
   workflow_dispatch:
 
 permissions:
   id-token: write      # required for AWS OIDC
-  contents: read
+  contents: write      # required to commit Argo CD desired-state updates
   pull-requests: write # required for hadolint PR annotations
 
 concurrency:
-  group: app-deploy-${{ github.ref }}
+  group: app-deploy
   cancel-in-progress: false
 
 env:
@@ -155,17 +155,16 @@ jobs:
     name: Deploy to staging
     needs: build-push
     if: >
-      github.event_name == 'pull_request' ||
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'workflow_call' ||
-      (github.event_name == 'workflow_run' &&
-       github.event.workflow_run.conclusion == 'success')
+      github.event_name == 'workflow_call'
     runs-on: ubuntu-latest
     environment:
       name: staging
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
@@ -190,33 +189,49 @@ jobs:
       - name: Install kustomize
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
 
-      - name: Render manifests
+      - name: Update staging desired state
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
+          git pull --ff-only origin main
           cd k8s/overlays/staging
-
           kustomize edit set image task-api="$IMAGE"
 
           VERSION="${IMAGE_TAG:0:7}"
-
-          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
-
-          kustomize edit remove patch --path version-patch.yaml 2>/dev/null || true
-          kustomize edit add patch --path version-patch.yaml
+          VERSION="$VERSION" python -c 'from pathlib import Path; import os, re; p=Path("kustomization.yaml"); s=p.read_text(); s,n=re.subn(r"(- name: APP_VERSION\s+value: )[^\n]+", lambda m: m.group(1) + chr(34) + os.environ["VERSION"] + chr(34), s); assert n == 1, f"expected one APP_VERSION value, found {n}"; p.write_text(s)'
           kustomize build .
 
-      - name: Apply manifests
-        run: kubectl apply -k k8s/overlays/staging/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kustomization.yaml
 
-      - name: Wait for rollout (auto-rollback on failure)
-        run: |
-          if ! kubectl rollout status deployment/task-api -n task-api-staging --timeout=180s; then
-            echo "::error::Staging rollout failed — rolling back"
-            kubectl describe pods -n task-api-staging -l app=task-api | tail -50
-            kubectl rollout undo deployment/task-api -n task-api-staging
-            exit 1
+          if git diff --cached --quiet; then
+            echo "Staging desired state is already current."
+            exit 0
           fi
+
+          git commit -m "deploy(staging): ${IMAGE_TAG}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Wait for Argo CD rollout
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          for i in $(seq 1 60); do
+            current=$(kubectl get deployment task-api -n task-api-staging -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+            [ "$current" = "$IMAGE" ] && break
+            echo "Waiting for Argo CD to sync staging... ($i/60)"
+            sleep 5
+          done
+          [ "$current" = "$IMAGE" ] || {
+            echo "::error::Argo CD did not sync the expected staging image"
+            exit 1
+          }
+          kubectl rollout status deployment/task-api -n task-api-staging --timeout=300s || {
+            kubectl describe pods -n task-api-staging -l app=task-api | tail -50
+            exit 1
+          }
 
       - name: Smoke test (staging)
         run: |
@@ -240,6 +255,8 @@ jobs:
       name: production
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
@@ -264,20 +281,16 @@ jobs:
       - name: Install kustomize
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f # v2
 
-      - name: Render manifests
+      - name: Update production desired state
         env:
           IMAGE: ${{ needs.build-push.outputs.image }}
         run: |
+          git pull --ff-only origin main
           cd k8s/overlays/production
-
           kustomize edit set image task-api="$IMAGE"
 
           VERSION="${IMAGE_TAG:0:7}"
-
-          printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: task-api\nspec:\n  template:\n    spec:\n      containers:\n        - name: task-api\n          env:\n            - name: APP_VERSION\n              value: "%s"\n' "$VERSION" > version-patch.yaml
-
-          kustomize edit remove patch --path version-patch.yaml 2>/dev/null || true
-          kustomize edit add patch --path version-patch.yaml
+          VERSION="$VERSION" python -c 'from pathlib import Path; import os, re; p=Path("kustomization.yaml"); s=p.read_text(); s,n=re.subn(r"(- name: APP_VERSION\s+value: )[^\n]+", lambda m: m.group(1) + chr(34) + os.environ["VERSION"] + chr(34), s); assert n == 1, f"expected one APP_VERSION value, found {n}"; p.write_text(s)'
           kustomize build .
 
       - name: Login to Amazon ECR
@@ -295,17 +308,39 @@ jobs:
             --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
             "${{ needs.build-push.outputs.image }}"
 
-      - name: Apply manifests
-        run: kubectl apply -k k8s/overlays/production/
-
-      - name: Wait for rollout (auto-rollback on failure)
+      - name: Commit production desired state
         run: |
-          if ! kubectl rollout status deployment/task-api -n task-api --timeout=180s; then
-            echo "::error::Rollout failed — rolling back"
-            kubectl describe pods -n task-api -l app=task-api | tail -50
-            kubectl rollout undo deployment/task-api -n task-api
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/overlays/production/kustomization.yaml
+
+          if git diff --cached --quiet; then
+            echo "Production desired state is already current."
+            exit 0
           fi
+
+          git commit -m "deploy(production): ${IMAGE_TAG}"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Wait for Argo CD rollout
+        env:
+          IMAGE: ${{ needs.build-push.outputs.image }}
+        run: |
+          for i in $(seq 1 60); do
+            current=$(kubectl get deployment task-api -n task-api -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)
+            [ "$current" = "$IMAGE" ] && break
+            echo "Waiting for Argo CD to sync production... ($i/60)"
+            sleep 5
+          done
+          [ "$current" = "$IMAGE" ] || {
+            echo "::error::Argo CD did not sync the expected production image"
+            exit 1
+          }
+          kubectl rollout status deployment/task-api -n task-api --timeout=300s || {
+            kubectl describe pods -n task-api -l app=task-api | tail -50
+            exit 1
+          }
 
       - name: Smoke test through ALB #quick test
         run: |

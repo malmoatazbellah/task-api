@@ -1,104 +1,151 @@
-# End-to-End DevOps Capstone: Ship a Node.js API to AWS EKS
+# Task API: End-to-End DevOps on AWS EKS
 
-You get a working Node.js REST API. Your job is to take it all the way to production:
+A production-style Node.js REST API deployed to Amazon EKS through Terraform, GitHub Actions, Kustomize, and Argo CD.
 
-**Containerize it → provision AWS infrastructure with Terraform → build a CI/CD pipeline with GitHub Actions → deploy it to a Kubernetes (EKS) cluster.**
+The project implements a complete delivery platform:
 
-By the end, every `git push` to `main` will test, build, scan, and deploy your app to a live URL. No one will click anything in the AWS console.
-
----
+- AWS infrastructure provisioned with Terraform
+- Temporary AWS credentials through GitHub Actions OIDC
+- Immutable container images stored in Amazon ECR
+- Automated testing, linting, vulnerability scanning, and image signing
+- Staging and production Kubernetes environments
+- GitOps reconciliation and self-healing through Argo CD
+- Public ingress through the AWS Load Balancer Controller
+- Horizontal Pod Autoscaling using metrics-server
+- Prometheus monitoring and Grafana dashboards
+- Automated workload, load balancer, and infrastructure teardown
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    dev[Developer] -->|git push| gh[GitHub repo]
+    developer[Developer] -->|Push or pull request| github[GitHub repository]
 
-    subgraph GHA[GitHub Actions]
-        tf[terraform.yml<br/>plan / apply]
-        ci[app-cicd.yml<br/>test → lint → build → scan → push → deploy]
+    subgraph actions[GitHub Actions]
+        infrastructure[Infrastructure workflow]
+        application[Application CI/CD]
     end
 
-    gh --> tf
-    gh --> ci
+    github --> infrastructure
+    github --> application
 
-    tf -->|OIDC role| aws
-    ci -->|OIDC role| aws
+    infrastructure -->|OIDC| terraformRole[AWS Terraform role]
+    application -->|OIDC| deployRole[AWS deploy role]
 
-    subgraph aws[AWS account]
-        s3[(S3<br/>Terraform state)]
-        ecr[(ECR<br/>image registry)]
-        subgraph vpc[VPC: 2 AZs]
-            lb[Load Balancer<br/>public subnets]
-            subgraph eks[EKS cluster: private subnets]
-                p1[task-api pod]
-                p2[task-api pod]
+    subgraph aws[AWS]
+        state[(S3 Terraform state)]
+        ecr[(Amazon ECR)]
+
+        subgraph vpc[VPC across two Availability Zones]
+            subgraph eks[Amazon EKS]
+                argocd[Argo CD]
+                staging[Staging workload]
+                production[Production workload]
+                monitoring[Prometheus and Grafana]
+                metrics[metrics-server]
+                controller[AWS Load Balancer Controller]
             end
+
+            stagingAlb[Staging ALB]
+            productionAlb[Production ALB]
+            grafanaAlb[Grafana ALB]
         end
     end
 
-    ci -->|docker push| ecr
-    ecr -->|image pull| eks
-    user[Users] -->|HTTP| lb --> p1 & p2
+    terraformRole --> state
+    terraformRole --> eks
+    application --> ecr
+    application -->|Update desired image| github
+    github -->|Watch Kustomize overlays| argocd
+    argocd --> staging
+    argocd --> production
+    ecr --> staging
+    ecr --> production
+    controller --> stagingAlb
+    controller --> productionAlb
+    controller --> grafanaAlb
 ```
 
-## Tools you will use
+Terraform creates the AWS infrastructure and installs the cluster services. The application pipeline builds and signs an immutable image, updates the desired state in Git, and waits for Argo CD to reconcile each environment.
 
-| Area | Tool |
+## Technology stack
+
+| Area | Implementation |
 |---|---|
-| Application | Node.js 24, Express, `node:test` |
-| Containers | **Docker (you write the Dockerfile)**, hadolint, Trivy |
-| Infrastructure as Code | Terraform (S3 remote state, community modules) |
-| Cloud | AWS: IAM + OIDC, VPC, NAT Gateway, ECR, EKS, ELB |
-| Orchestration | Kubernetes: Namespace, ConfigMap, Deployment, Service, probes, rolling updates |
-| CI/CD | GitHub Actions, Environments with approvals, OIDC (no stored AWS keys) |
-| Observability | `/healthz`, `/readyz`, Prometheus `/metrics` endpoint |
+| Application | Node.js 24, Express, `node:test`, Supertest |
+| Container | Multi-stage Docker image based on Node.js Alpine |
+| Infrastructure | Terraform 1.10+ with S3 remote state |
+| AWS | VPC, EKS, ECR, IAM, S3, NAT Gateway, ALB |
+| Kubernetes | Kustomize base with staging and production overlays |
+| GitOps | Argo CD `v3.6.3`, Helm chart `10.19.1` |
+| Ingress | AWS Load Balancer Controller using EKS Pod Identity |
+| Autoscaling | HPA backed by the EKS metrics-server add-on |
+| Monitoring | kube-prometheus-stack `70.4.2` and Grafana |
+| CI/CD | GitHub Actions with AWS OIDC and environment approvals |
+| Supply chain | Hadolint, Trivy, Cosign, ECR scanning, Dependabot |
 
----
+## Repository structure
 
-## ⚠️ Cost warning: read this first
-
-EKS is **not** free tier. While the infrastructure is running you pay for roughly:
-
-- EKS control plane: ~$0.10/hour
-- 2 × t3.medium nodes: ~$0.08/hour
-- NAT Gateway: ~$0.045/hour, plus data
-- Load balancer: ~$0.025/hour
-
-That's about **$6–7 per day**. Destroy everything when you finish each working session (see [Teardown](#phase-7--teardown)). Set up an **AWS Budget alert** (for example $20) before you start.
-
----
-
-## Prerequisites
-
-- AWS account with an IAM user that has admin rights (for the one-time bootstrap)
-- GitHub account
-- Installed locally: `git`, `node` (22+), `docker`, `terraform` (1.10+), `aws` CLI v2, `kubectl`
-- `aws configure` done and `aws sts get-caller-identity` works
-
-## Repository layout
-
-```
+```text
 .
-├── app/                        # Node.js API (given)
-│   ├── src/app.js              # routes, metrics
-│   ├── src/server.js           # startup + graceful shutdown
-│   ├── test/app.test.js        # unit tests
-│   ├── package.json / package-lock.json
-│   └── Dockerfile              # ← YOU CREATE THIS (plus .dockerignore)
+├── .github/
+│   ├── dependabot.yml
+│   └── workflows/
+│       ├── app-cicd.yml
+│       └── terraform.yml
+├── app/
+│   ├── src/
+│   │   ├── app.js
+│   │   └── server.js
+│   ├── test/
+│   │   └── app.test.js
+│   ├── .dockerignore
+│   ├── Dockerfile
+│   └── package.json
+├── k8s/
+│   ├── argocd/
+│   │   ├── production-application.yaml
+│   │   └── staging-application.yaml
+│   ├── base/
+│   ├── overlays/
+│   │   ├── production/
+│   │   └── staging/
+│   ├── 05-servicemonitor.yaml
+│   └── 06-grafana-ingress.yaml
 ├── terraform/
-│   ├── bootstrap/              # one-time: state bucket, GitHub OIDC, IAM roles
-│   └── infra/                  # VPC, EKS, ECR (run by the pipeline)
-├── k8s/                        # Kubernetes manifests
-│   └── optional/hpa.yaml       # stretch goal
-└── .github/workflows/
-    ├── terraform.yml           # infrastructure pipeline
-    └── app-cicd.yml            # application pipeline
+│   ├── bootstrap/
+│   ├── infra/
+│   └── helm-values-monitoring.yaml
+└── README.md
 ```
 
----
+- `app/` contains the API, tests, and container definition.
+- `terraform/bootstrap/` contains the example variables file and creates the remote-state bucket, GitHub OIDC provider, and pipeline IAM roles.
+- `terraform/infra/` creates the VPC, ECR repository, EKS cluster, add-ons, and AWS Load Balancer Controller identity.
+- `k8s/base/` contains resources shared by both environments.
+- `k8s/overlays/` defines the staging and production differences.
+- `k8s/argocd/` defines the Argo CD Applications.
+- `.github/workflows/` contains the infrastructure and application pipelines.
 
-## Phase 1: Run the app locally
+## Application and local development
+
+The API listens on port `3000` by default.
+
+| Method and path | Purpose |
+|---|---|
+| `GET /` | Service version, environment, hostname, and deployment information |
+| `GET /healthz` | Liveness endpoint |
+| `GET /readyz` | Readiness endpoint |
+| `GET /metrics` | Prometheus metrics |
+| `GET /api/tasks` | List tasks |
+| `POST /api/tasks` | Create a task |
+| `GET /api/tasks/:id` | Retrieve a task |
+| `PATCH /api/tasks/:id` | Update a task |
+| `DELETE /api/tasks/:id` | Delete a task |
+
+Tasks are stored in memory and are lost when the process or Pod restarts.
+
+### Run locally
 
 ```bash
 cd app
@@ -107,232 +154,362 @@ npm test
 npm start
 ```
 
-Try the endpoints:
-
-| Endpoint | Purpose |
-|---|---|
-| `GET /` | service info, version, and **which pod** answered (hostname) |
-| `GET /healthz` | liveness probe |
-| `GET /readyz` | readiness probe (returns 503 during shutdown) |
-| `GET /metrics` | Prometheus metrics |
-| `GET/POST /api/tasks`, `GET/PATCH/DELETE /api/tasks/:id` | Tasks CRUD |
+Verify the API:
 
 ```bash
-curl -X POST localhost:3000/api/tasks -H 'Content-Type: application/json' -d '{"title":"Write Dockerfile"}'
-curl localhost:3000/api/tasks
+curl http://localhost:3000/healthz
+
+curl -X POST http://localhost:3000/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Test the deployment"}'
+
+curl http://localhost:3000/api/tasks
 ```
 
-✅ **Checkpoint:** tests pass and you can create and list tasks.
-
----
-
-## Phase 2: Containerize the app (your main task) 🐳
-
-Create `app/Dockerfile` and `app/.dockerignore`. The pipeline will **reject** your image if it doesn't meet these requirements, so read them carefully.
-
-### Required
-
-1. **Multi-stage build.** Install dependencies in one stage and copy only what's needed into the final stage.
-2. **Small, official base image.** Use `node:24-alpine` or similar. Target final image size: **under 200 MB**.
-3. **Production dependencies only.** Use `npm ci` (not `npm install`) and leave out devDependencies.
-4. **Layer caching.** Copy `package.json` and `package-lock.json` and install **before** copying the source code. Explain why in your report.
-5. **Non-root user.** The Kubernetes Deployment enforces `runAsNonRoot` with UID 1000, and CI checks that `USER` is set.
-6. **Port 3000** exposed. The app reads `PORT` from the environment.
-7. **Exec-form `CMD`** (`CMD ["node", ...]`) so Node receives `SIGTERM` and shuts down gracefully. Don't use `npm start` as the entrypoint. Explain why in your report.
-8. **No write access needed.** The pod runs with a read-only root filesystem.
-9. **`.dockerignore`** that keeps `node_modules`, tests, `.git`, and secrets out of the build context.
-10. **Passes hadolint** with no warnings: `docker run --rm -i hadolint/hadolint < Dockerfile`
-
-### Bonus
-
-- `HEALTHCHECK` instruction
-- Image passes a Trivy scan with zero CRITICAL vulnerabilities: `trivy image task-api:local`
-
-### Test it locally
+### Run with Docker
 
 ```bash
-cd app
-docker build -t task-api:local .
-docker images task-api:local                       # check the size
+docker build -t task-api:local app
 docker run --rm -p 3000:3000 --read-only task-api:local
-curl localhost:3000/healthz
-docker inspect --format '{{.Config.User}}' task-api:local   # must not be empty or root
+curl http://localhost:3000/healthz
 ```
 
-Then stop the container with `docker stop` and confirm in the logs that you see `SIGTERM received, shutting down gracefully...`.
+The image uses a multi-stage build, installs production dependencies only, and runs as an unprivileged user. The Kubernetes deployment also enforces a non-root security context and a read-only root filesystem.
 
-✅ **Checkpoint:** the image builds, runs read-only as non-root, is under 200 MB, passes hadolint, and shuts down gracefully.
+## Infrastructure and initial setup
 
----
+### Prerequisites
 
-## Phase 3: Bootstrap AWS (one time, from your laptop)
+Install:
 
-The pipelines need somewhere to store Terraform state and a way to log into AWS **without access keys**. GitHub Actions uses **OIDC**: GitHub issues a short-lived token, and AWS trusts it only for *your* repo.
+- AWS CLI v2
+- Terraform 1.10 or newer
+- Docker
+- Node.js 22 or newer; Node.js 24 is used by CI and the container image
+- `kubectl`
+- Helm
+- Git
 
-1. Push this project to **your own** GitHub repository.
-2. Run the bootstrap stack:
+Configure a local AWS principal with enough permissions to create the bootstrap IAM, S3, and OIDC resources:
+
+```bash
+aws configure
+aws sts get-caller-identity
+```
+
+### Infrastructure defaults
+
+| Setting | Default |
+|---|---|
+| Project | `capstone` |
+| Environment | `dev` |
+| AWS region | `us-east-1` |
+| VPC CIDR | `10.0.0.0/16` |
+| Kubernetes version | `1.37` |
+| Worker instance type | `t3.small` |
+| Desired worker count | `3` |
+| Minimum worker count | `1` |
+| Maximum worker count | `3` |
+| Capacity type | On-Demand |
+| EKS API endpoint | Public |
+
+Confirm that the configured Kubernetes version is supported by Amazon EKS before provisioning.
+
+### Bootstrap AWS
+
+Copy the provided example variables file:
+
+```powershell
+Copy-Item terraform\bootstrap\terraform.tfvars.example terraform\bootstrap\terraform.tfvars
+```
+
+Update `terraform/bootstrap/terraform.tfvars` with values for your AWS region, project, GitHub owner, and repository:
+
+```hcl
+aws_region     = "us-east-1"
+project        = "capstone"
+github_owner   = "your-github-username"
+github_owner_id = "your-github-owner-numeric-id"
+github_repo    = "task-api"
+github_repo_id = "your-repository-numeric-id"
+```
+
+The numeric owner and repository IDs are used in the GitHub OIDC trust policy so repository or organization renames do not weaken the identity check.
+
+Run the bootstrap stack:
 
 ```bash
 cd terraform/bootstrap
-cp terraform.tfvars.example terraform.tfvars   # set github_owner and github_repo
 terraform init
+terraform fmt -check
+terraform validate
+terraform plan
 terraform apply
+terraform output
 ```
 
-3. Note the outputs. You'll need them in the next phase.
+The bootstrap creates:
 
-> The bootstrap state is stored **locally** in `terraform/bootstrap/terraform.tfstate`. Don't delete it. You'll need it to tear down at the end.
+- The S3 bucket used for Terraform remote state
+- Native S3 state locking
+- The GitHub Actions OIDC provider
+- A read-only Terraform planning role
+- A Terraform apply role
+- An application deployment role
 
-**Questions to answer in your report:**
-- What does the `sub` condition in the IAM trust policy protect against?
-- Why are there two roles instead of one?
+The bootstrap state is stored locally. Keep it available until the AWS infrastructure and bootstrap resources have both been destroyed.
 
----
+### Configure GitHub
 
-## Phase 4: Configure GitHub
-
-In your repo, go to **Settings → Secrets and variables → Actions → Variables** and add these **repository variables**:
+Add these repository variables under **Settings → Secrets and variables → Actions → Variables**:
 
 | Variable | Value |
 |---|---|
-| `AWS_REGION` | e.g. `us-east-1` (same as bootstrap) |
-| `TF_STATE_BUCKET` | bootstrap output |
-| `AWS_TERRAFORM_ROLE_ARN` | bootstrap output |
-| `AWS_DEPLOY_ROLE_ARN` | bootstrap output |
-| `EKS_CLUSTER_NAME` | `capstone-dev` (`<project>-<environment>`) |
-| `ECR_REPOSITORY` | `capstone-dev-task-api` |
+| `AWS_REGION` | Region used by the bootstrap stack |
+| `TF_STATE_BUCKET` | Bootstrap output |
+| `AWS_PLAN_ROLE_ARN` | Bootstrap output |
+| `AWS_TERRAFORM_ROLE_ARN` | Bootstrap output |
+| `AWS_DEPLOY_ROLE_ARN` | Bootstrap output |
+| `EKS_CLUSTER_NAME` | Normally `capstone-dev` |
+| `ECR_REPOSITORY` | Normally `capstone-dev-task-api` |
 
-Then go to **Settings → Environments** and create:
+Create these GitHub environments:
 
-- `infrastructure` with **Required reviewers** set to yourself (so no apply happens without approval)
-- `production` (optionally with required reviewers too)
+| Environment | Purpose |
+|---|---|
+| `infrastructure` | Approval boundary for infrastructure apply and destroy |
+| `staging` | Automatic staging deployment |
+| `production` | Production deployment approval boundary |
 
-> No secrets needed: OIDC replaces `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
+No long-lived AWS access keys are stored in GitHub. The workflows exchange GitHub OIDC tokens for temporary AWS credentials.
 
----
+## CI/CD and GitOps
 
-## Phase 5: Provision infrastructure with the pipeline
+### Infrastructure workflow
 
-1. Optional: in `terraform/infra/variables.tf`, check `kubernetes_version` against the [EKS supported versions](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html).
-2. Create a branch, make a small change under `terraform/infra/` (for example, add a tag), and open a **pull request**. Watch `terraform.yml` run `fmt`, `validate`, and `plan`. Read the plan in the job summary.
-3. Merge the PR. The **apply** job waits for your approval on the `infrastructure` environment. Approve it.
-4. Wait about 15 minutes for EKS to be created.
-5. Connect from your laptop. Add your IAM user ARN to `admin_principal_arns` first (via a PR), or use the output command if your user has access:
+The `Terraform (Infrastructure)` workflow runs when infrastructure files change and can also be started manually.
+
+On pull requests, it:
+
+1. Checks Terraform formatting.
+2. Initializes the S3 backend with native state locking.
+3. Validates the configuration.
+4. Creates a Terraform plan using the read-only planning role.
+5. uploads the plan as a short-lived workflow artifact.
+
+On a push to `main`, or a manual `apply`, the workflow waits for approval through the `infrastructure` environment and applies the saved plan using the Terraform role.
+
+After provisioning, it installs:
+
+- AWS Load Balancer Controller
+- kube-prometheus-stack chart `70.4.2`
+- The production `ServiceMonitor`
+- The Grafana Ingress
+- Argo CD chart `10.19.1`
+- The staging and production Argo CD Applications
+
+The workflow waits for the Argo CD Application CRD and application controller before applying the Applications.
+
+### Application workflow
+
+Pull requests that change the application, Kubernetes resources, or application workflow run the unit tests and Dockerfile linting.
+
+For deployable runs, the workflow:
+
+1. Runs the tests with Node.js 24.
+2. Checks the Dockerfile with Hadolint.
+3. Builds the container image.
+4. Smoke-tests `/healthz` locally.
+5. Confirms the image does not run as root.
+6. Scans for unfixed critical vulnerabilities with Trivy.
+7. Pushes an immutable Git-SHA tag to Amazon ECR.
+8. Signs the image using keyless Cosign signing.
+9. Updates and commits the staging Kustomize overlay.
+10. Waits for Argo CD to reconcile staging.
+11. Verifies the staging rollout and tests `/healthz` through its ALB.
+12. Waits for approval through the `production` environment.
+13. Verifies the image signature.
+14. Updates and commits the production overlay.
+15. Verifies the production rollout and ALB health.
+
+A fixed `app-deploy` concurrency group serializes deployment runs so staging and production desired-state updates cannot race.
+
+### Argo CD
+
+Argo CD watches these paths on the `main` branch:
+
+- `k8s/overlays/staging`
+- `k8s/overlays/production`
+
+The Applications deploy to `task-api-staging` and `task-api` respectively. Automated synchronization, pruning, and self-healing are enabled.
+
+The pipeline does not directly apply application Deployments. It commits the desired image and application version to Git, then waits for Argo CD to reconcile the cluster.
+
+## Kubernetes platform
+
+The application uses a shared Kustomize base containing:
+
+- ConfigMap
+- Deployment
+- ClusterIP Service
+- Horizontal Pod Autoscaler
+- ALB Ingress
+
+The overlays set the namespace, image, application version, and environment-specific configuration.
+
+| Environment | Namespace | Deployment |
+|---|---|---|
+| Staging | `task-api-staging` | Automatic after a successful image build |
+| Production | `task-api` | Requires approval through the GitHub `production` environment |
+
+### Ingress
+
+The AWS Load Balancer Controller creates separate internet-facing Application Load Balancers for staging, production, and Grafana.
+
+Retrieve their hostnames with:
 
 ```bash
-aws eks update-kubeconfig --region us-east-1 --name capstone-dev
-kubectl get nodes
+kubectl get ingress -A
 ```
 
-✅ **Checkpoint:** `kubectl get nodes` shows 2 `Ready` nodes, and the ECR repository exists.
+The current configuration exposes HTTP endpoints without TLS and is intended for a temporary demonstration environment.
 
-**Questions to answer in your report:**
-- Why do the worker nodes live in private subnets?
-- What do the `kubernetes.io/role/elb` subnet tags do?
-- What would happen if two people ran `terraform apply` at the same time? How does this setup prevent it?
+### Autoscaling
 
----
-
-## Phase 6: Deploy the app with CI/CD
-
-Commit your `Dockerfile` and `.dockerignore` and push to `main`. The `app-cicd.yml` pipeline runs:
-
-```
-test ──┐
-       ├──► build-push ──► deploy
-lint ──┘     (build, smoke test, non-root check,     (kubectl apply, rollout status,
-              Trivy scan, push to ECR)               auto-rollback, LB smoke test)
-```
-
-On a pull request, only `test` and `lint-docker` run.
-
-Watch the deploy:
+The EKS metrics-server add-on supplies CPU and memory resource metrics to the Horizontal Pod Autoscaler.
 
 ```bash
+kubectl get hpa -A
+kubectl top pods -n task-api
+kubectl top pods -n task-api-staging
+```
+
+metrics-server supports Kubernetes autoscaling. It is separate from Prometheus, which stores application and platform metrics for monitoring.
+
+### Monitoring
+
+The infrastructure workflow installs kube-prometheus-stack in the `monitoring` namespace.
+
+The API exposes Prometheus metrics on `/metrics`, including request counts, response status labels, request-duration histograms, and Node.js process metrics.
+
+A `ServiceMonitor` scrapes the production service. Staging is intentionally validated through Kubernetes health, rollout checks, and pipeline smoke tests instead of a separate Prometheus target.
+
+The Grafana dashboard displays:
+
+- Request rate
+- p95 request latency
+- HTTP 5xx error percentage
+
+Check the monitoring resources:
+
+```bash
+kubectl get pods -n monitoring
+kubectl get servicemonitor -A
+kubectl get ingress grafana -n monitoring
+```
+
+## Security and known limitations
+
+Implemented controls include:
+
+- GitHub Actions OIDC instead of stored AWS access keys
+- Separate Terraform plan, Terraform apply, and application deployment roles
+- Repository identity checks using immutable GitHub owner and repository IDs
+- Namespace-scoped EKS access for application deployment
+- Immutable ECR image tags
+- ECR scan-on-push
+- Trivy image scanning
+- Keyless Cosign signing and production verification
+- GitHub Actions pinned to commit SHAs
+- Dependabot updates
+- Non-root container execution
+- Read-only container root filesystem
+- Kubernetes resource requests and limits
+- Production approval through GitHub Environments
+
+Known limitations:
+
+- The EKS API endpoint is public so GitHub-hosted runners can connect.
+- Application and Grafana ALBs are public and use HTTP without TLS.
+- The Grafana administrator password is currently stored in `terraform/helm-values-monitoring.yaml`.
+- The VPC uses one NAT Gateway to reduce cost, which is not highly available across Availability Zones.
+- Tasks are stored in memory and disappear when a process or Pod restarts.
+- Bootstrap Terraform state is stored locally.
+- Cluster services are installed by the infrastructure workflow after Terraform completes.
+
+For a production deployment, restrict network access, enable TLS through AWS Certificate Manager, move the Grafana credential to a secret manager, use private runners or restricted EKS endpoint CIDRs, and use persistent application storage.
+
+## Validation and operations
+
+Run the application tests:
+
+```bash
+cd app
+npm ci
+npm test
+```
+
+Validate Terraform:
+
+```bash
+terraform -chdir=terraform/bootstrap fmt -check
+terraform -chdir=terraform/bootstrap validate
+
+terraform -chdir=terraform/infra fmt -check
+terraform -chdir=terraform/infra validate
+```
+
+Render both Kustomize overlays:
+
+```bash
+kubectl kustomize k8s/overlays/staging
+kubectl kustomize k8s/overlays/production
+```
+
+Inspect a live deployment:
+
+```bash
+kubectl get applications -n argocd
 kubectl get all -n task-api
-kubectl get svc task-api -n task-api      # EXTERNAL-IP is your app's URL
+kubectl get all -n task-api-staging
+kubectl get ingress -A
+kubectl get hpa -A
 ```
 
-The job summary prints the URL. Open it and refresh a few times. The `hostname` changes because the load balancer spreads traffic across pods.
+## Teardown
 
-✅ **Checkpoint:** the app is reachable at the load balancer URL, and `version` shows your commit SHA.
+Run the `Terraform (Infrastructure)` workflow manually with `action` set to `destroy`.
 
-### Exercises
+Before applying the Terraform destroy plan, the workflow:
 
-1. **Change and ship.** Change `WELCOME_MESSAGE` in `k8s/01-configmap.yaml` and a response field in `app/src/app.js`. Push, and confirm the new version is live with zero downtime. Run `while true; do curl -s http://<LB>/ | jq .version; sleep 0.5; done` during the deploy.
-2. **Break it on purpose.** Change `livenessProbe.path` to `/does-not-exist` and push. Watch the pipeline detect the failed rollout and run `kubectl rollout undo`. Then fix it.
-3. **Fail the gate.** Change the `Dockerfile` to run as root, push on a branch, and open a PR. Which job catches it?
-4. **Scale.** Run `kubectl scale deploy/task-api -n task-api --replicas=4`, then create a few tasks and list them repeatedly. Why do results differ between requests? How would you fix that?
-5. **Self-heal.** Delete a pod with `kubectl delete pod` and watch what Kubernetes does.
+1. Checks whether the EKS cluster still exists.
+2. Deletes the Argo CD Applications.
+3. Deletes both Kustomize overlays.
+4. Deletes the `argocd` and `monitoring` namespaces.
+5. Waits for load balancers in the VPC to disappear.
+6. Force-deletes remaining load balancers if normal cleanup does not complete.
+7. Waits for load balancer network interfaces to release.
+8. Applies the Terraform destroy plan.
 
----
+This ordering prevents Kubernetes-managed ALBs from blocking subnet and VPC deletion.
 
-## Phase 7: Teardown
-
-⚠️ **Order matters.** The load balancer was created by Kubernetes, not Terraform. If you destroy the VPC first, Terraform will hang.
+After the infrastructure has been destroyed, remove the bootstrap resources locally:
 
 ```bash
-# 1. Delete the Kubernetes resources (removes the load balancer)
-kubectl delete -f k8s/
-# wait ~2 minutes for the load balancer to disappear
-
-# 2. Destroy the infrastructure
-#    GitHub → Actions → "Terraform (Infrastructure)" → Run workflow → action: destroy → approve
-
-# 3. Only at the very end of the course: destroy the bootstrap
-cd terraform/bootstrap && terraform destroy
+cd terraform/bootstrap
+terraform destroy
 ```
 
-Verify in the AWS console (EC2, Load Balancers, NAT Gateways, EKS) that nothing is left running.
+Do not destroy the bootstrap stack first because the infrastructure workflow still depends on its state bucket and IAM roles.
 
----
+## Cost considerations
 
-## Deliverables
+The worker nodes use `t3.small` instances, which may be covered by eligible AWS Free Tier or promotional credits. However, the complete platform is not free because it also provisions:
 
-1. **GitHub repo link** with your `Dockerfile`, `.dockerignore`, and a green pipeline history
-2. **Screenshots:**
-   - successful `terraform plan` on a PR, and the approved apply
-   - green `App CI/CD` run with the job summary showing the URL
-   - `kubectl get all -n task-api`
-   - the app responding in a browser
-   - the auto-rollback from Exercise 2
-3. **Report (1–2 pages)** answering every **Questions** block above, plus:
-   - Explain each line of your Dockerfile and your final image size
-   - Describe the full path of a code change from `git push` to running pod
-   - One thing you would change before running this in real production
-4. **Proof of teardown:** a screenshot of the destroy run
+- An Amazon EKS control plane
+- Three `t3.small` worker nodes by default, which may exceed the available free compute allowance
+- One NAT Gateway
+- Application Load Balancers
+- EBS storage, data transfer, and CloudWatch usage
 
-## Grading rubric (100 pts)
-
-| Area | Points |
-|---|---|
-| Dockerfile meets all 10 requirements | 25 |
-| Infrastructure provisioned through the Terraform pipeline (PR plan + approved apply) | 20 |
-| App deployed via GitHub Actions and reachable through the load balancer | 20 |
-| Exercises 1–5 completed with evidence | 15 |
-| Report: correct, clear answers | 15 |
-| Clean teardown | 5 |
-| **Bonus:** stretch goals | up to +15 |
-
-## Stretch goals
-
-- **Ingress:** install the AWS Load Balancer Controller (via EKS Pod Identity) and replace the `LoadBalancer` Service with an ALB Ingress
-- **Autoscaling:** install metrics-server, apply `k8s/optional/hpa.yaml`, and load-test with `hey` or `k6`
-- **Helm or Kustomize:** replace the `sed` templating with a Helm chart or Kustomize overlays
-- **Least privilege:** replace `AdministratorAccess` on the Terraform role with a scoped policy, add a read-only plan role, and scope the deploy role to the `task-api` namespace
-- **Monitoring:** install kube-prometheus-stack and build a Grafana dashboard from `/metrics`
-- **Supply chain:** pin GitHub Actions to commit SHAs, sign images with cosign, and add Dependabot
-- **GitOps:** replace the `kubectl apply` step with Argo CD watching the `k8s/` folder
-- **Multi-environment:** add a `staging` environment that deploys automatically, with `production` requiring approval
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | `github_owner`/`github_repo` in bootstrap doesn't match the repo exactly, or the environment name differs from `infrastructure`/`production` |
-| `kubectl`: `the server has asked for the client to provide credentials` | Your IAM principal has no EKS access entry. Add it to `admin_principal_arns` |
-| Pod `CreateContainerConfigError: container has runAsNonRoot and image will run as root` | Your Dockerfile has no `USER` |
-| Pod `CrashLoopBackOff` | `kubectl logs -n task-api <pod>`. Often the wrong `CMD` or files missing from the image |
-| `ImagePullBackOff` | Image tag not in ECR. Did `build-push` succeed? |
-| `terraform destroy` stuck on subnets or the VPC | The load balancer still exists. Run `kubectl delete -f k8s/` first |
-| hadolint `DL3008`/`DL3018` | Pin package versions in `apt-get` or `apk add`, or avoid installing extra packages |
+Actual charges depend on the AWS account, region, usage, and current Free Tier eligibility. Configure an AWS Budget and destroy the environment when it is not being demonstrated.
