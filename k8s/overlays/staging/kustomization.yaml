@@ -4,31 +4,31 @@ kind: Kustomization
 namespace: task-api-staging
 
 resources:
-  - ../../base
+- ../../base
 
 images:
-  - name: task-api
-    newName: task-api
-    newTag: dev
+- name: task-api
+  newName: 349631302690.dkr.ecr.eu-central-1.amazonaws.com/capstone-dev-task-api
+  newTag: 0fdd59f4d7e31c4dd722bcf37365bc7a4276b6fb
 
 patches:
-  - patch: |-
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: task-api
-      spec:
-        template:
-          spec:
-            containers:
-              - name: task-api
-                env:
-                  - name: APP_VERSION
-                    value: "dev"
-  - patch: |-
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: task-api-config
-      data:
-        APP_ENV: "staging"
+- patch: |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: task-api
+    spec:
+      template:
+        spec:
+          containers:
+            - name: task-api
+              env:
+                - name: APP_VERSION
+                  value: "0fdd59f"
+- patch: |-
+    apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: task-api-config
+    data:
+      APP_ENV: "staging"
