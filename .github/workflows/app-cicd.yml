@@ -211,8 +211,19 @@ jobs:
           fi
 
           git commit -m "deploy(staging): ${IMAGE_TAG}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to push staging desired state after 3 attempts."
+              exit 1
+            fi
+            echo "Push failed; retrying in $((attempt * 10)) seconds..."
+            sleep $((attempt * 10))
+          done
 
       - name: Wait for Argo CD rollout
         env:
@@ -320,8 +331,19 @@ jobs:
           fi
 
           git commit -m "deploy(production): ${IMAGE_TAG}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+
+          for attempt in 1 2 3; do
+            git pull --rebase origin main
+            if git push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to push production desired state after 3 attempts."
+              exit 1
+            fi
+            echo "Push failed; retrying in $((attempt * 10)) seconds..."
+            sleep $((attempt * 10))
+          done
 
       - name: Wait for Argo CD rollout
         env:
