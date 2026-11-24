@@ -5,4 +5,23 @@ namespace: task-api
 
 resources:
   - ../../base
-  - 06-ingress.yaml
+
+images:
+  - name: task-api
+    newName: task-api
+    newTag: dev
+
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: task-api
+      spec:
+        template:
+          spec:
+            containers:
+              - name: task-api
+                env:
+                  - name: APP_VERSION
+                    value: "dev"

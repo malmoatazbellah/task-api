@@ -1,8 +1,3 @@
-# STRETCH GOAL — Horizontal Pod Autoscaler.
-# Requires metrics-server in the cluster. Install it first, e.g.:
-#   kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-# Then: kubectl apply -f k8s/optional/hpa.yaml
-# Generate load and watch: kubectl get hpa -n task-api -w
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

@@ -132,8 +132,11 @@ jobs:
         run: |
           if aws eks describe-cluster --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }} > /dev/null 2>&1; then
             aws eks update-kubeconfig --region ${{ vars.AWS_REGION }} --name ${{ vars.EKS_CLUSTER_NAME }}
+            kubectl delete -f k8s/argocd/ --ignore-not-found --wait=true --timeout=60s || true
             kubectl delete -k k8s/overlays/production/ --ignore-not-found
             kubectl delete -k k8s/overlays/staging/ --ignore-not-found
+            kubectl delete namespace argocd --ignore-not-found --timeout=60s || \
+              kubectl patch namespace argocd -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
             kubectl delete namespace monitoring --ignore-not-found --timeout=60s || \
               kubectl patch namespace monitoring -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
           else
@@ -195,7 +198,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Create namespaces and install monitoring stack
+      - name: Install cluster services and Argo CD applications
         if: github.event.inputs.action != 'destroy'
         working-directory: ${{ github.workspace }}
         run: |
@@ -226,6 +229,24 @@ jobs:
           kubectl apply -f k8s/00-namespace.yaml
           kubectl apply -f k8s/05-servicemonitor.yaml
           kubectl apply -f k8s/06-grafana-ingress.yaml
+
+          helm repo add argo https://argoproj.github.io/argo-helm --force-update
+          helm repo update
+          helm upgrade --install argocd argo/argo-cd \
+            --version 10.19.1 \
+            --namespace argocd \
+            --create-namespace \
+            --wait \
+            --timeout 10m
+
+          kubectl wait --for=condition=Established \
+            crd/applications.argoproj.io \
+            --timeout=120s
+          kubectl rollout status statefulset/argocd-application-controller \
+            --namespace argocd \
+            --timeout=300s
+          kubectl apply -f k8s/argocd/
+
           for i in $(seq 1 30); do
             host=$(kubectl get ingress grafana -n monitoring -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$host" ]; then
