@@ -70,7 +70,7 @@ flowchart LR
 
 Terraform creates the AWS infrastructure and installs the cluster services. The application pipeline builds and signs an immutable image, updates the desired state in Git, and waits for Argo CD to reconcile each environment.
 
-## Technology stack
+## Tech stack
 
 | Area | Implementation |
 |---|---|
