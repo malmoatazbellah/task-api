@@ -299,8 +299,10 @@ data "aws_iam_policy_document" "terraform_apply" {
   }
 
   statement {
-    sid     = "ElbDescribe"
-    actions = ["elasticloadbalancing:DescribeLoadBalancers"]
+    sid = "ElbDescribe"
+    actions = ["elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DeleteLoadBalancer",
+    ]
     resources = ["*"]
   }
 }
