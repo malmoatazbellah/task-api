@@ -1,11 +1,3 @@
-# =============================================================================
-# Application pipeline
-#   1. test          → npm ci + unit tests
-#   2. lint-docker   → hadolint checks YOUR Dockerfile
-#   3. build-push    → docker build, Trivy scan, push to ECR
-#   4. deploy-staging → commit the staging desired state for Argo CD
-#   5. deploy         → commit the production desired state after approval
-# =============================================================================
 name: App CI/CD
 
 on:
