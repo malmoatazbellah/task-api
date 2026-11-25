@@ -21,7 +21,7 @@ data "aws_iam_role" "github_terraform" {
 # =============================================================================
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "~> 5.21"
+  version = "~> 6.8"
 
   name = local.name
   cidr = var.vpc_cidr
