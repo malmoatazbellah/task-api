@@ -19,7 +19,7 @@ on:
         type: choice
         options: [plan, apply, destroy]
         default: plan
-
+# quick test
 permissions:
   id-token: write   # required for AWS OIDC
   contents: read
