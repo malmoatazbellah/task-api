@@ -2,6 +2,8 @@
 
 A production-style Node.js REST API deployed to Amazon EKS through Terraform, GitHub Actions, Kustomize, and Argo CD.
 
+This repository is a completed implementation of the [End-to-End DevOps Capstone Project](https://github.com/MohammedBKassab/DevOps-Capstone-Project), including the core requirements and the ingress, autoscaling, Kustomize, least-privilege IAM, monitoring, supply-chain security, GitOps, and multi-environment stretch goals.
+
 The project implements a complete delivery platform:
 
 - AWS infrastructure provisioned with Terraform
@@ -89,10 +91,12 @@ Terraform creates the AWS infrastructure and installs the cluster services. The 
 ```text
 .
 ├── .github/
-│   ├── dependabot.yml
-│   └── workflows/
-│       ├── app-cicd.yml
-│       └── terraform.yml
+│   ├── workflows/
+│   │   ├── app-cicd.yml
+│   │   └── terraform.yml
+│   └── dependabot.yml
+├── .vscode/
+│   └── settings.json
 ├── app/
 │   ├── src/
 │   │   ├── app.js
@@ -101,21 +105,51 @@ Terraform creates the AWS infrastructure and installs the cluster services. The 
 │   │   └── app.test.js
 │   ├── .dockerignore
 │   ├── Dockerfile
+│   ├── package-lock.json
 │   └── package.json
 ├── k8s/
 │   ├── argocd/
 │   │   ├── production-application.yaml
 │   │   └── staging-application.yaml
 │   ├── base/
+│   │   ├── 01-configmap.yaml
+│   │   ├── 02-deployment.yaml
+│   │   ├── 03-service.yaml
+│   │   ├── 04-hpa.yaml
+│   │   ├── 06-ingress.yaml
+│   │   └── kustomization.yaml
 │   ├── overlays/
 │   │   ├── production/
+│   │   │   ├── kustomization.yaml
+│   │   │   └── namespace.yaml
 │   │   └── staging/
+│   │       ├── kustomization.yaml
+│   │       └── namespace.yaml
+│   ├── 00-namespace.yaml
+│   ├── 01-configmap.yaml
+│   ├── 02-deployment.yaml
+│   ├── 03-service.yaml
+│   ├── 04-hpa.yaml
 │   ├── 05-servicemonitor.yaml
-│   └── 06-grafana-ingress.yaml
+│   ├── 06-grafana-ingress.yaml
+│   └── kustomization.yaml
 ├── terraform/
 │   ├── bootstrap/
+│   │   ├── .terraform.lock.hcl
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── terraform.tfvars.example
+│   │   └── variables.tf
 │   ├── infra/
+│   │   ├── .terraform.lock.hcl
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   ├── terraform.tfvars.example
+│   │   ├── variables.tf
+│   │   └── versions.tf
 │   └── helm-values-monitoring.yaml
+├── .gitattributes
+├── .gitignore
 └── README.md
 ```
 
